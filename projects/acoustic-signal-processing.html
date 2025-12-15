@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Acoustic Signal Processing | Caleb Jones</title>
+  <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+<header>
+  <h1>Acoustic Signal Processing & Feature Extraction</h1>
+
+  <h2>Problem</h2>
+  <p>
+    High-rate acoustic recordings contain meaningful structure but are dominated by
+    noise, nonstationarity, and artifacts. The challenge was to extract stable,
+    interpretable features suitable for downstream modeling.
+  </p>
+
+  <h2>Approach</h2>
+  <ul>
+    <li>Bandpass filtering and denoising of raw acoustic signals</li>
+    <li>Time–frequency representations using STFT and log-spectrograms</li>
+    <li>Amplitude normalization and alignment across trials</li>
+    <li>Dimensionality reduction using PCA to capture dominant structure</li>
+    <li>Validation via reconstruction error and predictive modeling</li>
+  </ul>
+
+  <h2>Results</h2>
+  <p>
+    The resulting feature representations were significantly more stable than raw
+    signals and enabled reliable prediction of neural firing rates using regression
+    and tree-based models.
+  </p>
+
+  <p>
+    PCA revealed low-dimensional structure that aligned with meaningful acoustic
+    events, while removing redundant or noisy dimensions.
+  </p>
+
+  <h2>Engineering Takeaways</h2>
+  <p>
+    This project reinforced the importance of validating signal processing assumptions
+    before applying machine learning. Careful preprocessing and feature design
+    dramatically improved model stability and interpretability.
+  </p>
+
+</header>
+
+</body>
+</html>
