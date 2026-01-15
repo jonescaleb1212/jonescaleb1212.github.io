@@ -1,0 +1,86 @@
+.fun-page {
+  min-height: 100vh;
+  background: radial-gradient(circle at top, rgba(17, 17, 17, 0.08), transparent 50%),
+    radial-gradient(circle at bottom, rgba(17, 17, 17, 0.12), transparent 55%),
+    linear-gradient(120deg, #f6f6f6, #ededed, #ffffff);
+  background-size: 160% 160%;
+  animation: drift 14s ease-in-out infinite;
+}
+
+@keyframes drift {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 80%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}
+
+.fun-wrapper {
+  max-width: 900px;
+  margin: 80px auto;
+  padding: 0 20px 60px;
+}
+
+.fun-header h1 {
+  font-size: 48px;
+  margin-bottom: 10px;
+}
+
+.fun-header .subtitle {
+  margin-bottom: 36px;
+}
+
+.fun-panel {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 24px;
+  padding: 32px;
+  box-shadow: 0 30px 60px rgba(17, 17, 17, 0.1);
+  backdrop-filter: blur(12px);
+}
+
+.fun-panel h2 {
+  margin-top: 0;
+  font-size: 22px;
+}
+
+.fun-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 24px 0 32px;
+}
+
+.fun-buttons a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 22px;
+  border-radius: 999px;
+  border: 2px solid #111;
+  text-decoration: none;
+  color: #111;
+  font-weight: 600;
+  background: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fun-buttons a:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(17, 17, 17, 0.12);
+}
+
+.fun-back {
+  display: inline-block;
+  color: #111;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.fun-back:hover {
+  text-decoration: underline;
+}
