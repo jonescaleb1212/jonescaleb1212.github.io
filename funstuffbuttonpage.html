@@ -21,7 +21,7 @@
       background: radial-gradient(circle at 20% 10%, #2b0077 0%, var(--bg) 45%, #02000a 100%);
       overflow-x:hidden;
       color:#fff;
-      cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='22' font-size='22'>😎</text></svg>") 0 24, auto;
+      cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text y='22' font-size='22'>🤪</text></svg>") 0 24, auto;
     }
 
     /* Layers */
@@ -496,8 +496,8 @@
     <div class="scanlines"></div>
 
     <div class="marqueeLayer">
-      <div class="marq"><span>WELCOME TO THE INTERNET • WELCOME TO THE INTERNET • WELCOME TO THE INTERNET • 😎 • </span></div>
-      <div class="marq"><span>UNDER CONSTRUCTION • BEST VIEWED WITH YOUR EYEBALLS • CLICK BUTTONS FOR ADVENTURE • 😎 • </span></div>
+      <div class="marq"><span>🤖 WELCOME TO THE INTERNET • WELCOME TO THE INTERNET • WELCOME TO THE INTERNET • 🤖 • </span></div>
+      <div class="marq"><span>UNDER CONSTRUCTION • BEST VIEWED WITH YOUR EYEBALLS </span></div>
       <div class="marq"><span>NEON MODE ENGAGED • SPARKLES INBOUND • HAVE A RAD DAY • 😎 • </span></div>
     </div>
 
@@ -804,14 +804,14 @@
     }
 
     if (wxIcon) wxIcon.textContent = icon;
-    if (wxBig) wxBig.textContent = `${desc}, ${temp}°F 😎`;
+    if (wxBig) wxBig.textContent = `${desc}, ${temp}°F `;
     if (wxTemp) wxTemp.textContent = `${temp}°F`;
     if (wxWind) wxWind.textContent = windStat;
     if (wxPrecip) wxPrecip.textContent = precip;
 
     if (wxMeta) wxMeta.textContent = `Updated ${cur.time} • Timezone: ${data.timezone ?? "auto"}`;
     setWxStatus("LIVE");
-    if (btn) btn.textContent = "Refresh Forecast 😎";
+    if (btn) btn.textContent = "Refresh Forecast ☁️";
 
     // Daily chips (next 5 days)
     const dTime = data.daily?.time || [];
@@ -863,14 +863,14 @@
         } catch (e) {
             setWxStatus("ERROR");
             if (wxMeta) wxMeta.textContent = "Weather unavailable (fetch failed). Check console.";
-            if (btn) btn.textContent = "Try Again 😎";
+            if (btn) btn.textContent = "Try Again 😵‍💫";
             console.error(e);
         }
         },
         (err) => {
         setWxStatus("DENIED");
         if (wxMeta) wxMeta.textContent = "Location denied. Click again and allow location to show local forecast.";
-        if (btn) btn.textContent = "Enable Local Forecast 😎";
+        if (btn) btn.textContent = "Enable Local Forecast ☁️";
         console.warn(err);
         },
         { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 }
