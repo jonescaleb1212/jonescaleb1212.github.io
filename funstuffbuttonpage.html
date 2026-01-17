@@ -581,11 +581,11 @@
                 <div class="wxStat"><b>Precip</b>: <span id="wxPrecip">—</span></div>
             </div>
 
-            <div class="wxStrip" id="wxStrip" aria-label="Next hours forecast"></div>
+            <div class="wxStrip" id="wxStrip" aria-label="Next days forecast"></div>
 
             <div class="wxHint" id="wxHint">Tip: GitHub Pages is HTTPS, so location works. If you deny it, weather stays offline.</div>
 
-            <button class="wxBtn" id="wxBtn">Enable Local Forecast 😎</button>
+            <button class="wxBtn" id="wxBtn">Enable Local Forecast ⛅</button>
             </div>
 
             </div>
@@ -706,7 +706,7 @@
 
       setTimeout(() => s.remove(), 800);
     }
-   // ---- Weather module (upgraded UI) ----
+    // ---- Weather module (daily panels) ----
     function wxCodeToText(code) {
     const map = {
         0: "Clear",
@@ -731,7 +731,6 @@
     }
 
     function wxCodeToIcon(code) {
-    // Cute but simple icons
     if (code === 0) return "☀️";
     if (code <= 2) return "🌤️";
     if (code === 3) return "☁️";
@@ -744,24 +743,21 @@
     return "😎";
     }
 
-async function fetchOpenMeteo(lat, lon) {
-  const url =
-    "https://api.open-meteo.com/v1/forecast" +
-    `?latitude=${encodeURIComponent(lat)}` +
-    `&longitude=${encodeURIComponent(lon)}` +
-    "&current=temperature_2m,weather_code,wind_speed_10m" +
-    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max" +
-    "&temperature_unit=fahrenheit" +
-    "&wind_speed_unit=mph" +
-    "&timezone=auto";
+    async function fetchOpenMeteo(lat, lon) {
+    const url =
+        "https://api.open-meteo.com/v1/forecast" +
+        `?latitude=${encodeURIComponent(lat)}` +
+        `&longitude=${encodeURIComponent(lon)}` +
+        "&current=temperature_2m,weather_code,wind_speed_10m" +
+        "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max" +
+        "&temperature_unit=fahrenheit" +
+        "&wind_speed_unit=mph" +
+        "&timezone=auto";
 
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error("Weather fetch failed");
-  return res.json();
-}
-
-
-
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("Weather fetch failed");
+    return res.json();
+    }
 
     function setWxStatus(text) {
     const el = document.getElementById("wxStatus");
@@ -773,18 +769,7 @@ async function fetchOpenMeteo(lat, lon) {
     if (strip) strip.innerHTML = "";
     }
 
-    const chip = document.createElement("div");
-    chip.className = "wxChip";
-    chip.innerHTML = `
-        <div class="t">${timeLabel}</div>
-        <div style="font-size:18px; margin:4px 0 2px;">${icon}</div>
-        <span class="s">${temp}°F • ${precip}%</span>
-    `;
-    strip.appendChild(chip);
-    }
-
     async function renderWeatherFromCoords(lat, lon) {
-    // UI hooks
     const wxBig = document.getElementById("wxBig");
     const wxMeta = document.getElementById("wxMeta");
     const wxIcon = document.getElementById("wxIcon");
@@ -792,6 +777,7 @@ async function fetchOpenMeteo(lat, lon) {
     const wxWind = document.getElementById("wxWind");
     const wxPrecip = document.getElementById("wxPrecip");
     const btn = document.getElementById("wxBtn");
+    const strip = document.getElementById("wxStrip");
 
     setWxStatus("CONNECTING");
     if (btn) btn.textContent = "Refreshing…";
@@ -805,7 +791,6 @@ async function fetchOpenMeteo(lat, lon) {
     const icon = wxCodeToIcon(cur.weather_code);
     const temp = Math.round(cur.temperature_2m);
 
-    // Today stats from DAILY arrays (more consistent than current wind)
     let precip = "—";
     if (data.daily?.precipitation_probability_max?.length) {
         precip = `${data.daily.precipitation_probability_max[0]}% (today max)`;
@@ -828,7 +813,7 @@ async function fetchOpenMeteo(lat, lon) {
     setWxStatus("LIVE");
     if (btn) btn.textContent = "Refresh Forecast 😎";
 
-    // Build a mini daily strip (next 5 days)
+    // Daily chips (next 5 days)
     const dTime = data.daily?.time || [];
     const dMax  = data.daily?.temperature_2m_max || [];
     const dMin  = data.daily?.temperature_2m_min || [];
@@ -838,26 +823,24 @@ async function fetchOpenMeteo(lat, lon) {
 
     const nDays = Math.min(5, dTime.length, dMax.length, dMin.length, dP.length, dCode.length, dWind.length);
 
-    for (let i = 0; i < nDays; i++) {
+    if (strip) {
+        for (let i = 0; i < nDays; i++) {
         const date = new Date(dTime[i] + "T00:00:00");
         const label = date.toLocaleDateString(undefined, { weekday: "short" });
         const dayIcon = wxCodeToIcon(dCode[i]);
 
-        const strip = document.getElementById("wxStrip");
-        if (!strip) break;
-
         const chip = document.createElement("div");
         chip.className = "wxChip";
         chip.innerHTML = `
-        <div class="t">${label}</div>
-        <div style="font-size:18px; margin:4px 0 2px;">${dayIcon}</div>
-        <span class="s">Hi ${Math.round(dMax[i])}° • Lo ${Math.round(dMin[i])}°</span>
-        <span class="s">Precip ${dP[i]}% • Wind ${Math.round(dWind[i])} mph</span>
+            <div class="t">${label}</div>
+            <div style="font-size:18px; margin:4px 0 2px;">${dayIcon}</div>
+            <span class="s">Hi ${Math.round(dMax[i])}° • Lo ${Math.round(dMin[i])}°</span>
+            <span class="s">Precip ${dP[i]}% • Wind ${Math.round(dWind[i])} mph</span>
         `;
         strip.appendChild(chip);
+        }
     }
     }
-
 
     function requestAndShowWeather() {
     const btn = document.getElementById("wxBtn");
@@ -879,8 +862,8 @@ async function fetchOpenMeteo(lat, lon) {
             await renderWeatherFromCoords(lat, lon);
         } catch (e) {
             setWxStatus("ERROR");
-            if (wxMeta) wxMeta.textContent = "Weather unavailable (fetch failed).";
-            if (btn) btn.textContent = "Refresh Forecast";
+            if (wxMeta) wxMeta.textContent = "Weather unavailable (fetch failed). Check console.";
+            if (btn) btn.textContent = "Try Again 😎";
             console.error(e);
         }
         },
@@ -894,10 +877,9 @@ async function fetchOpenMeteo(lat, lon) {
     );
     }
 
-    // Wire the button
-    document.getElementById("wxBtn")?.addEventListener("click", () => {
-    requestAndShowWeather();
-    });
+    // Wire the button (safe)
+    document.getElementById("wxBtn")?.addEventListener("click", requestAndShowWeather);
+
 
 
     let last = 0;
