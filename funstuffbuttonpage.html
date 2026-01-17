@@ -744,21 +744,22 @@
     return "😎";
     }
 
-    async function fetchOpenMeteo(lat, lon) {
-    const url =
-        "https://api.open-meteo.com/v1/forecast" +
-        `?latitude=${encodeURIComponent(lat)}` +
-        `&longitude=${encodeURIComponent(lon)}` +
-        "&current=temperature_2m,weather_code,wind_speed_10m" +
-        "&hourly=temperature_2m,precipitation_probability,weather_code" +
-        "&temperature_unit=fahrenheit" +
-        "&wind_speed_unit=mph" +
-        "&timezone=auto";
+async function fetchOpenMeteo(lat, lon) {
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    `?latitude=${encodeURIComponent(lat)}` +
+    `&longitude=${encodeURIComponent(lon)}` +
+    "&current=temperature_2m,weather_code,wind_speed_10m" +
+    "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max" +
+    "&temperature_unit=fahrenheit" +
+    "&wind_speed_unit=mph" +
+    "&timezone=auto";
 
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("Weather fetch failed");
-    return res.json();
-    }
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Weather fetch failed");
+  return res.json();
+}
+
 
     function fmtHour(isoTime) {
     // isoTime like "2026-01-17T13:00"
@@ -818,7 +819,16 @@
 
     // Precip: use first hourly entry as "next hour"
     let precip = "—";
-    if (data.hourly?.precipitation_probability?.length) precip = `${data.hourly.precipitation_probability[0]}%`;
+    if (data.daily?.precipitation_probability_max?.length) {
+    precip = `${data.daily.precipitation_probability_max[0]}% (today max)`;
+    }
+
+    let windStat = `${wind} mph`;
+    if (data.daily?.wind_speed_10m_max?.length) {
+    windStat = `${Math.round(data.daily.wind_speed_10m_max[0])} mph (today max)`;
+    }
+    if (wxWind) wxWind.textContent = windStat;
+
 
     if (wxIcon) wxIcon.textContent = icon;
     if (wxBig) wxBig.textContent = `${desc}, ${temp}°F 😎`;
@@ -829,12 +839,37 @@
     if (wxMeta) wxMeta.textContent = `Updated ${cur.time} • Timezone: ${data.timezone ?? "auto"}`;
     setWxStatus("LIVE");
     if (btn) btn.textContent = "Refresh Forecast 😎";
+    
+    // Build a mini daily strip (next 5 days)
+    const dTime = data.daily?.time || [];
+    const dMax  = data.daily?.temperature_2m_max || [];
+    const dMin  = data.daily?.temperature_2m_min || [];
+    const dP    = data.daily?.precipitation_probability_max || [];
+    const dCode = data.daily?.weather_code || [];
+    const dWind = data.daily?.wind_speed_10m_max || [];
 
-    // Build a mini next-hours strip (next 6 hours)
-    const tArr = data.hourly?.time || [];
-    const tempArr = data.hourly?.temperature_2m || [];
-    const pArr = data.hourly?.precipitation_probability || [];
-    const codeArr = data.hourly?.weather_code || [];
+    const nDays = Math.min(5, dTime.length, dMax.length, dMin.length, dP.length, dCode.length, dWind.length);
+
+    for (let i = 0; i < nDays; i++) {
+    const date = new Date(dTime[i] + "T00:00:00");
+    const label = date.toLocaleDateString(undefined, { weekday: "short" }); // e.g. "Sat"
+    const icon = wxCodeToIcon(dCode[i]);
+
+    // Reuse your existing chip renderer; we’ll pack hi/lo + precip into the “s” line
+    const strip = document.getElementById("wxStrip");
+    if (!strip) break;
+
+    const chip = document.createElement("div");
+    chip.className = "wxChip";
+    chip.innerHTML = `
+        <div class="t">${label}</div>
+        <div style="font-size:18px; margin:4px 0 2px;">${icon}</div>
+        <span class="s">Hi ${Math.round(dMax[i])}° • Lo ${Math.round(dMin[i])}°</span>
+        <span class="s">Precip ${dP[i]}% • Wind ${Math.round(dWind[i])} mph</span>
+    `;
+    strip.appendChild(chip);
+    }
+
 
     const n = Math.min(6, tArr.length, tempArr.length, pArr.length, codeArr.length);
     for (let i = 0; i < n; i++) {
