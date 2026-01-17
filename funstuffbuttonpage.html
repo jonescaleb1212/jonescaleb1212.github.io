@@ -327,6 +327,165 @@
     @media (prefers-reduced-motion: reduce){
       .tiler, .marq span, .retro-btn:after, .blink { animation: none !important; }
     }
+    /* ---- Weather module (more impressive) ---- */
+    .wxbox{
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 16px;
+    border: 3px groove rgba(255,255,255,.35);
+    background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.25)),
+        radial-gradient(circle at 20% 10%, rgba(0,255,204,.18), transparent 55%),
+        radial-gradient(circle at 90% 80%, rgba(255,0,255,.18), transparent 60%),
+        rgba(0,0,0,.38);
+    box-shadow:
+        0 0 0 6px rgba(0,255,204,.06),
+        0 0 30px rgba(255,0,255,.12),
+        inset 0 0 18px rgba(0,255,204,.08);
+    position:relative;
+    overflow:hidden;
+    }
+
+    .wxbox:before{
+    content:"";
+    position:absolute;
+    inset:-60px;
+    background: conic-gradient(from 90deg, transparent 0 70%, rgba(255,255,255,.16) 78%, transparent 86%);
+    animation: wxsweep 3.2s linear infinite;
+    opacity:.35;
+    pointer-events:none;
+    }
+    @keyframes wxsweep{
+    to{ transform: rotate(360deg); }
+    }
+
+    .wxTop{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    position:relative;
+    z-index:1;
+    }
+
+    .wxTitle{
+    font-weight: 900;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+    text-shadow: 0 0 10px rgba(255,255,255,.14);
+    font-size: 13px;
+    }
+
+    .wxStatus{
+    font-size: 12px;
+    opacity:.95;
+    background: rgba(0,0,0,.45);
+    border: 2px inset rgba(255,255,255,.20);
+    padding: 6px 10px;
+    border-radius: 999px;
+    }
+
+    .wxMain{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-top:10px;
+    position:relative;
+    z-index:1;
+    }
+
+    .wxIcon{
+    width: 52px;
+    height: 52px;
+    display:grid;
+    place-items:center;
+    border-radius: 16px;
+    border: 2px inset rgba(255,255,255,.22);
+    background: rgba(0,0,0,.38);
+    font-size: 26px;
+    filter: drop-shadow(0 0 10px rgba(255,255,255,.18));
+    }
+
+    .wxBig{
+    font-weight:900;
+    font-size: 18px;
+    line-height:1.1;
+    text-shadow: 0 0 12px rgba(255,255,255,.14);
+    }
+
+    .wxMeta{
+    font-size: 12px;
+    opacity:.92;
+    margin-top:4px;
+    }
+
+    .wxGrid{
+    display:grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap:8px;
+    margin-top:10px;
+    position:relative;
+    z-index:1;
+    }
+
+    .wxStat{
+    background: rgba(0,0,0,.40);
+    border: 1px dashed rgba(255,255,255,.25);
+    border-radius: 14px;
+    padding: 8px 10px;
+    box-shadow: 0 0 16px rgba(0,255,204,.06);
+    }
+    .wxStat b{
+    color: var(--neon1);
+    font-weight:900;
+    }
+
+    .wxStrip{
+    display:flex;
+    gap:8px;
+    overflow:auto;
+    margin-top:10px;
+    padding-bottom:4px;
+    position:relative;
+    z-index:1;
+    }
+    .wxChip{
+    flex: 0 0 auto;
+    min-width: 92px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    background: rgba(0,0,0,.40);
+    border: 2px outset rgba(255,255,255,.20);
+    font-size: 12px;
+    text-align:center;
+    white-space:nowrap;
+    }
+    .wxChip .t{ font-weight:900; color: var(--neon3); }
+    .wxChip .s{ opacity:.92; margin-top:2px; display:block; }
+
+    .wxHint{
+    margin-top:8px;
+    font-size: 11px;
+    opacity:.9;
+    position:relative;
+    z-index:1;
+    }
+
+    .wxBtn{
+    margin-top:10px;
+    width:100%;
+    cursor:pointer;
+    font-family:inherit;
+    font-weight:900;
+    padding:10px 12px;
+    border-radius:12px;
+    border:3px outset rgba(255,255,255,.45);
+    background: rgba(0,0,0,.35);
+    color:#fff;
+    }
+    .wxBtn:active{ border-style: inset; }
+
+
   </style>
 </head>
 
@@ -402,21 +561,33 @@
           <div class="tiny">
             <div class="pill">Visitor count: <span id="visits">000001</span></div>
             <div class="pill">Page hits: <span id="hits">0001337</span></div>
-            <div class="pill">Local weather: <span id="wx">—</span></div>
-            <div style="margin-top:8px; font-size:12px; opacity:.95;">
-            <span id="wxDetail"></span>
+            <div class="wxbox" id="wxBox">
+            <div class="wxTop">
+                <div class="wxTitle">🌦️ Weather Terminal</div>
+                <div class="wxStatus" id="wxStatus">IDLE</div>
             </div>
-            <div style="margin-top:10px;">
-            <button id="wxBtn" style="
-                cursor:pointer;
-                font-family:inherit;
-                font-weight:900;
-                padding:10px 12px;
-                border-radius:12px;
-                border:3px outset rgba(255,255,255,.45);
-                background: rgba(0,0,0,.35);
-                color:#fff;
-            ">Enable Local Forecast 😎</button>
+
+            <div class="wxMain">
+                <div class="wxIcon" id="wxIcon">😎</div>
+                <div>
+                <div class="wxBig" id="wxBig">Local forecast: —</div>
+                <div class="wxMeta" id="wxMeta">Click enable to fetch your forecast (uses browser location).</div>
+                </div>
+            </div>
+
+            <div class="wxGrid">
+                <div class="wxStat"><b>Temp</b>: <span id="wxTemp">—</span></div>
+                <div class="wxStat"><b>Wind</b>: <span id="wxWind">—</span></div>
+                <div class="wxStat"><b>Precip</b>: <span id="wxPrecip">—</span></div>
+            </div>
+
+            <div class="wxStrip" id="wxStrip" aria-label="Next hours forecast"></div>
+
+            <div class="wxHint" id="wxHint">Tip: GitHub Pages is HTTPS, so location works. If you deny it, weather stays offline.</div>
+
+            <button class="wxBtn" id="wxBtn">Enable Local Forecast 😎</button>
+            </div>
+
             </div>
 
             <hr style="border:none;border-top:2px dotted rgba(255,255,255,.25); margin:10px 0;">
@@ -535,6 +706,7 @@
 
       setTimeout(() => s.remove(), 800);
     }
+   // ---- Weather module (upgraded UI) ----
     function wxCodeToText(code) {
     const map = {
         0: "Clear",
@@ -552,10 +724,24 @@
         71: "Light snow",
         73: "Snow",
         75: "Heavy snow",
-        80: "Rain showers",
+        80: "Showers",
         95: "Thunderstorm"
     };
     return map[code] ?? `Weather (${code})`;
+    }
+
+    function wxCodeToIcon(code) {
+    // Cute but simple icons
+    if (code === 0) return "☀️";
+    if (code <= 2) return "🌤️";
+    if (code === 3) return "☁️";
+    if (code === 45 || code === 48) return "🌫️";
+    if (code >= 51 && code <= 55) return "🌦️";
+    if (code >= 61 && code <= 65) return "🌧️";
+    if (code >= 71 && code <= 75) return "🌨️";
+    if (code === 80) return "🌧️";
+    if (code === 95) return "⛈️";
+    return "😎";
     }
 
     async function fetchOpenMeteo(lat, lon) {
@@ -564,7 +750,7 @@
         `?latitude=${encodeURIComponent(lat)}` +
         `&longitude=${encodeURIComponent(lon)}` +
         "&current=temperature_2m,weather_code,wind_speed_10m" +
-        "&hourly=precipitation_probability,temperature_2m" +
+        "&hourly=temperature_2m,precipitation_probability,weather_code" +
         "&temperature_unit=fahrenheit" +
         "&wind_speed_unit=mph" +
         "&timezone=auto";
@@ -574,39 +760,105 @@
     return res.json();
     }
 
-    async function renderWeatherFromCoords(lat, lon) {
-    const wxEl = document.getElementById("wx");
-    const wxDetail = document.getElementById("wxDetail");
-
-    wxEl.textContent = "Loading…";
-    wxDetail.textContent = "";
-
-    const data = await fetchOpenMeteo(lat, lon);
-    const cur = data.current;
-
-    const temp = Math.round(cur.temperature_2m);
-    const wind = Math.round(cur.wind_speed_10m);
-    const desc = wxCodeToText(cur.weather_code);
-
-    wxEl.textContent = `${desc}, ${temp}°F 😎`;
-
-    // show first hourly precip prob if present
-    let precip = "";
-    if (data.hourly?.precipitation_probability?.length) {
-        precip = ` • Precip chance: ${data.hourly.precipitation_probability[0]}%`;
+    function fmtHour(isoTime) {
+    // isoTime like "2026-01-17T13:00"
+    const d = new Date(isoTime);
+    let h = d.getHours();
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12; if (h === 0) h = 12;
+    return `${h}${ampm}`;
     }
 
-    wxDetail.textContent = `Wind ${wind} mph${precip} • Updated ${cur.time}`;
+    function setWxStatus(text) {
+    const el = document.getElementById("wxStatus");
+    if (el) el.textContent = text;
+    }
+
+    function clearWxStrip() {
+    const strip = document.getElementById("wxStrip");
+    if (strip) strip.innerHTML = "";
+    }
+
+    function addWxChip(timeLabel, icon, temp, precip) {
+    const strip = document.getElementById("wxStrip");
+    if (!strip) return;
+
+    const chip = document.createElement("div");
+    chip.className = "wxChip";
+    chip.innerHTML = `
+        <div class="t">${timeLabel}</div>
+        <div style="font-size:18px; margin:4px 0 2px;">${icon}</div>
+        <span class="s">${temp}°F • ${precip}%</span>
+    `;
+    strip.appendChild(chip);
+    }
+
+    async function renderWeatherFromCoords(lat, lon) {
+    // UI hooks
+    const wxBig = document.getElementById("wxBig");
+    const wxMeta = document.getElementById("wxMeta");
+    const wxIcon = document.getElementById("wxIcon");
+    const wxTemp = document.getElementById("wxTemp");
+    const wxWind = document.getElementById("wxWind");
+    const wxPrecip = document.getElementById("wxPrecip");
+    const btn = document.getElementById("wxBtn");
+
+    setWxStatus("CONNECTING");
+    if (btn) btn.textContent = "Refreshing…";
+    if (wxMeta) wxMeta.textContent = `Coords: ${lat.toFixed(2)}, ${lon.toFixed(2)} • fetching forecast…`;
+    clearWxStrip();
+
+    const data = await fetchOpenMeteo(lat, lon);
+
+    const cur = data.current;
+    const desc = wxCodeToText(cur.weather_code);
+    const icon = wxCodeToIcon(cur.weather_code);
+    const temp = Math.round(cur.temperature_2m);
+    const wind = Math.round(cur.wind_speed_10m);
+
+    // Precip: use first hourly entry as "next hour"
+    let precip = "—";
+    if (data.hourly?.precipitation_probability?.length) precip = `${data.hourly.precipitation_probability[0]}%`;
+
+    if (wxIcon) wxIcon.textContent = icon;
+    if (wxBig) wxBig.textContent = `${desc}, ${temp}°F 😎`;
+    if (wxTemp) wxTemp.textContent = `${temp}°F`;
+    if (wxWind) wxWind.textContent = `${wind} mph`;
+    if (wxPrecip) wxPrecip.textContent = precip;
+
+    if (wxMeta) wxMeta.textContent = `Updated ${cur.time} • Timezone: ${data.timezone ?? "auto"}`;
+    setWxStatus("LIVE");
+    if (btn) btn.textContent = "Refresh Forecast 😎";
+
+    // Build a mini next-hours strip (next 6 hours)
+    const tArr = data.hourly?.time || [];
+    const tempArr = data.hourly?.temperature_2m || [];
+    const pArr = data.hourly?.precipitation_probability || [];
+    const codeArr = data.hourly?.weather_code || [];
+
+    const n = Math.min(6, tArr.length, tempArr.length, pArr.length, codeArr.length);
+    for (let i = 0; i < n; i++) {
+        addWxChip(
+        fmtHour(tArr[i]),
+        wxCodeToIcon(codeArr[i]),
+        Math.round(tempArr[i]),
+        pArr[i]
+        );
+    }
     }
 
     function requestAndShowWeather() {
-    const wxEl = document.getElementById("wx");
-    const wxDetail = document.getElementById("wxDetail");
+    const btn = document.getElementById("wxBtn");
+    const wxMeta = document.getElementById("wxMeta");
 
     if (!("geolocation" in navigator)) {
-        wxEl.textContent = "Geolocation not supported";
+        setWxStatus("NO GEO");
+        if (wxMeta) wxMeta.textContent = "Geolocation not supported in this browser.";
         return;
     }
+
+    setWxStatus("ASKING");
+    if (btn) btn.textContent = "Allow location…";
 
     navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -614,14 +866,16 @@
             const { latitude: lat, longitude: lon } = pos.coords;
             await renderWeatherFromCoords(lat, lon);
         } catch (e) {
-            wxEl.textContent = "Weather unavailable";
-            wxDetail.textContent = "";
+            setWxStatus("ERROR");
+            if (wxMeta) wxMeta.textContent = "Weather unavailable (fetch failed).";
+            if (btn) btn.textContent = "Try Again 😎";
             console.error(e);
         }
         },
         (err) => {
-        wxEl.textContent = "Location denied";
-        wxDetail.textContent = "Click the button and allow location to show your local forecast.";
+        setWxStatus("DENIED");
+        if (wxMeta) wxMeta.textContent = "Location denied. Click again and allow location to show local forecast.";
+        if (btn) btn.textContent = "Enable Local Forecast 😎";
         console.warn(err);
         },
         { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 }
@@ -633,8 +887,6 @@
     requestAndShowWeather();
     });
 
-    // Optional: try automatically once (comment out if you want button-only)
-    // requestAndShowWeather();
 
     let last = 0;
     window.addEventListener("pointermove", (e) => {
