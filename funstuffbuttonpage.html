@@ -351,7 +351,7 @@
         <div class="logo">
           <div class="badge">😎</div>
           <div>
-            <h1>My Classic Web HQ</h1>
+            <h1>Caleb's Classic Web HQ</h1>
             <div style="font-size:12px; opacity:.9;">totally legit • totally fire • totally rad</div>
           </div>
         </div>
@@ -404,6 +404,23 @@
             <div class="pill">Page hits: <span id="hits">0001337</span></div>
             <div class="pill">Mood: <span id="mood">NEON</span></div>
             <div class="pill">Dial-up: <span id="dialup">CONNECTED</span></div>
+            <div class="pill">Local weather: <span id="wx">—</span></div>
+            <div style="margin-top:8px; font-size:12px; opacity:.95;">
+            <span id="wxDetail"></span>
+            </div>
+            <div style="margin-top:10px;">
+            <button id="wxBtn" style="
+                cursor:pointer;
+                font-family:inherit;
+                font-weight:900;
+                padding:10px 12px;
+                border-radius:12px;
+                border:3px outset rgba(255,255,255,.45);
+                background: rgba(0,0,0,.35);
+                color:#fff;
+            ">Enable Local Forecast 😎</button>
+            </div>
+
             <hr style="border:none;border-top:2px dotted rgba(255,255,255,.25); margin:10px 0;">
             <div class="blink">★ NEW: Click anywhere for sparkles ★</div>
             <p style="margin:10px 0 0;">
@@ -522,6 +539,106 @@
 
       setTimeout(() => s.remove(), 800);
     }
+    function wxCodeToText(code) {
+    const map = {
+        0: "Clear",
+        1: "Mostly clear",
+        2: "Partly cloudy",
+        3: "Overcast",
+        45: "Fog",
+        48: "Rime fog",
+        51: "Light drizzle",
+        53: "Drizzle",
+        55: "Heavy drizzle",
+        61: "Light rain",
+        63: "Rain",
+        65: "Heavy rain",
+        71: "Light snow",
+        73: "Snow",
+        75: "Heavy snow",
+        80: "Rain showers",
+        95: "Thunderstorm"
+    };
+    return map[code] ?? `Weather (${code})`;
+    }
+
+    async function fetchOpenMeteo(lat, lon) {
+    const url =
+        "https://api.open-meteo.com/v1/forecast" +
+        `?latitude=${encodeURIComponent(lat)}` +
+        `&longitude=${encodeURIComponent(lon)}` +
+        "&current=temperature_2m,weather_code,wind_speed_10m" +
+        "&hourly=precipitation_probability,temperature_2m" +
+        "&temperature_unit=fahrenheit" +
+        "&wind_speed_unit=mph" +
+        "&timezone=auto";
+
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("Weather fetch failed");
+    return res.json();
+    }
+
+    async function renderWeatherFromCoords(lat, lon) {
+    const wxEl = document.getElementById("wx");
+    const wxDetail = document.getElementById("wxDetail");
+
+    wxEl.textContent = "Loading…";
+    wxDetail.textContent = "";
+
+    const data = await fetchOpenMeteo(lat, lon);
+    const cur = data.current;
+
+    const temp = Math.round(cur.temperature_2m);
+    const wind = Math.round(cur.wind_speed_10m);
+    const desc = wxCodeToText(cur.weather_code);
+
+    wxEl.textContent = `${desc}, ${temp}°F 😎`;
+
+    // show first hourly precip prob if present
+    let precip = "";
+    if (data.hourly?.precipitation_probability?.length) {
+        precip = ` • Precip chance: ${data.hourly.precipitation_probability[0]}%`;
+    }
+
+    wxDetail.textContent = `Wind ${wind} mph${precip} • Updated ${cur.time}`;
+    }
+
+    function requestAndShowWeather() {
+    const wxEl = document.getElementById("wx");
+    const wxDetail = document.getElementById("wxDetail");
+
+    if (!("geolocation" in navigator)) {
+        wxEl.textContent = "Geolocation not supported";
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+        try {
+            const { latitude: lat, longitude: lon } = pos.coords;
+            await renderWeatherFromCoords(lat, lon);
+        } catch (e) {
+            wxEl.textContent = "Weather unavailable";
+            wxDetail.textContent = "";
+            console.error(e);
+        }
+        },
+        (err) => {
+        wxEl.textContent = "Location denied";
+        wxDetail.textContent = "Click the button and allow location to show your local forecast.";
+        console.warn(err);
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 10 * 60 * 1000 }
+    );
+    }
+
+    // Wire the button
+    document.getElementById("wxBtn")?.addEventListener("click", () => {
+    requestAndShowWeather();
+    });
+
+    // Optional: try automatically once (comment out if you want button-only)
+    // requestAndShowWeather();
 
     let last = 0;
     window.addEventListener("pointermove", (e) => {
