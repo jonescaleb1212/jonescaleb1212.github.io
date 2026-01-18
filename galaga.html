@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Galaga (HTML)</title>
+  <style>
+    html,body{margin:0;height:100%;background:#070812;color:#fff;font-family:system-ui,Segoe UI,Arial}
+    #wrap{display:flex;align-items:center;justify-content:center;height:100%}
+    canvas{background:radial-gradient(circle at 30% 20%, #1b1350 0%, #070812 55%, #02020a 100%);
+           border:1px solid rgba(255,255,255,.12); border-radius:14px; box-shadow:0 10px 40px rgba(0,0,0,.55)}
+    .hud{position:fixed;left:14px;top:12px;font-size:14px;opacity:.9;line-height:1.35}
+    .hud kbd{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);padding:2px 6px;border-radius:8px}
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div><strong>Mini Galaga</strong></div>
+    <div>Move: <kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd></div>
+    <div>Shoot: <kbd>Space</kbd> (hold)</div>
+    <div>Pause: <kbd>P</kbd> · Restart: <kbd>R</kbd></div>
+  </div>
+  <div id="wrap">
+    <canvas id="c" width="900" height="650"></canvas>
+  </div>
+
+<script>
+(() => {
+  // -----------------------------
+  // Canvas + helpers
+  // -----------------------------
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  const W = canvas.width, H = canvas.height;
+
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp = (a,b,t)=>a+(b-a)*t;
+
+  function circle(x,y,r,fill){
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle = fill; ctx.fill();
+  }
+
+  function text(s,x,y,size=18,alpha=1,align="left"){
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "#fff";
+    ctx.font = `700 ${size}px system-ui,Segoe UI,Arial`;
+    ctx.textAlign = align;
+    ctx.fillText(s,x,y);
+    ctx.restore();
+  }
+
+  // -----------------------------
+  // Input
+  // -----------------------------
+  const keys = new Set();
+  let shootHeld = false;
+
+  window.addEventListener("keydown", (e) => {
+    if (["ArrowLeft","ArrowRight","Space","KeyA","KeyD","KeyP","KeyR"].includes(e.code)) e.preventDefault();
+    keys.add(e.code);
+
+    if (e.code === "Space") shootHeld = true;
+    if (e.code === "KeyP" && !gameOver) paused = !paused;
+
+    if (e.code === "KeyR") reset();
+  });
+
+  window.addEventListener("keyup", (e) => {
+    keys.delete(e.code);
+    if (e.code === "Space") shootHeld = false;
+  });
+
+  // -----------------------------
+  // Game state
+  // -----------------------------
+  let paused = false;
+  let t = 0;
+  let score = 0;
+  let high = Number(localStorage.getItem("mini_galaga_high") || 0);
+  let wave = 1;
+  let gameOver = false;
+
+  const LB_KEY = "mini_galaga_leaderboard_v1"; // local leaderboard key
+
+  function loadLB(){
+    try { return JSON.parse(localStorage.getItem(LB_KEY) || "[]"); }
+    catch { return []; }
+  }
+  function saveLB(lb){
+    localStorage.setItem(LB_KEY, JSON.stringify(lb));
+  }
+  function addToLB(name, score){
+    const clean = (name || "ANON").trim().slice(0, 14) || "ANON";
+    const lb = loadLB();
+    lb.push({ name: clean.toUpperCase(), score: Math.floor(score), t: Date.now() });
+    lb.sort((a,b)=> b.score - a.score || a.t - b.t);
+    const top = lb.slice(0, 10);
+    saveLB(top);
+    return top;
+  }
+
+  // -----------------------------
+  // Difficulty tuning (EASY EARLY, ramps up)
+  // -----------------------------
+  function diffForWave(w){
+    // Linear ramp over the first ~10 waves, then cap
+    const ramp = clamp((w - 1) / 10, 0, 1);   // 0 at wave 1, 1 at wave 11+
+    const lin  = ramp;                        // purely linear (no smoothstep)
+
+    return {
+      grace: Math.max(0, 2.4 - 0.18*(w-1)),        // still gives early breathing room
+
+      // GLOBAL enemy shots per second (smooth linear)
+      shotsPerSec: 0.7 + 2.3*lin,                  // 0.7 → 3.0 over ~10 waves
+
+      // bullet speed (linear)
+      bulletSpeed: 210 + 220*lin + 3*w,            // steady ramp
+
+      // dive chance multiplier (linear)
+      diveMult: 0.18 + 0.92*lin,                   // steady ramp
+
+      // formation sway (linear)
+      sway: 26 + 60*lin,
+
+      // per-enemy fire cadence (linear)
+      fireSlow: 1.35 - 0.55*lin,                   // early slower, later faster
+    };
+  }
+
+
+  let waveStartT = 0;
+  let shotBudget = 0; // accumulates fractional "allowed shots"
+
+  const stars = Array.from({length: 220}, () => ({
+    x: Math.random()*W,
+    y: Math.random()*H,
+    z: rand(0.2, 1.1),
+    tw: rand(0, Math.PI*2)
+  }));
+
+  const fx = [];
+  const bullets = [];
+  const ebullets = [];
+  const enemies = [];
+  const powerups = [];
+
+  const player = {
+    x: W*0.5,
+    y: H-70,
+    vx: 0,
+    w: 38,
+    h: 30,
+    speed: 720,     // px/s
+    cooldown: 0,
+    fireRate: 0.12, // seconds
+    lives: 3,
+    invuln: 0,
+    spread: 0,      // 0 = single, 1 = double
+  };
+
+  function spawnExplosion(x,y,scale=1){
+    for(let i=0;i<26;i++){
+      fx.push({
+        x,y,
+        vx: rand(-220,220)*scale,
+        vy: rand(-240,140)*scale,
+        r: rand(1.2,3.8)*scale,
+        a: 1,
+        life: rand(0.35,0.75),
+        hue: rand(190,330)
+      });
+    }
+  }
+
+  function spawnPowerup(x,y){
+    powerups.push({
+      x,y,
+      vy: 120,
+      r: 12,
+      a: 1,
+      type: "spread",
+      spin: rand(0,Math.PI*2)
+    });
+  }
+
+  function makeEnemy(x,y,type="bee"){
+    const base = (type==="boss") ? 2.1 : (type==="butterfly") ? 1.4 : 1.0;
+    return {
+      x,y,
+      ox:x, oy:y,
+      vx: 0, vy: 0,
+      r: 16*base,
+      hp: type==="boss" ? 6 : (type==="butterfly" ? 2 : 1),
+      type,
+      phase: rand(0,Math.PI*2),
+      dive: 0, // 0 = in formation, >0 diving timer
+      fire: rand(1.2, 2.8) / base, // slower initial cadence
+
+      wob: rand(0.7, 1.4),
+      alive: true
+    };
+  }
+
+  function spawnWave(n){
+    enemies.length = 0;
+    ebullets.length = 0;
+    bullets.length = 0;
+    powerups.length = 0;
+    waveStartT = t;
+    shotBudget = 0;
+
+    const cols = 10;
+    const rows = Math.min(4 + Math.floor(n/2), 7);
+    const spacingX = 70;
+    const spacingY = 54;
+
+    const startX = W/2 - (cols-1)*spacingX/2;
+    const startY = 120;
+
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const x = startX + c*spacingX;
+        const y = startY + r*spacingY;
+        let type = "bee";
+        if (r===0 && (c===4 || c===5) && n>=2) type = "boss";
+        else if (r<=1 && n>=2) type = "butterfly";
+        else if (r<=2 && n>=3) type = (Math.random()<0.35 ? "butterfly" : "bee");
+        enemies.push(makeEnemy(x, y, type));
+      }
+    }
+  }
+
+  function reset(){
+    t = 0; score = 0; wave = 1;
+    player.x = W*0.5; player.vx = 0;
+    player.lives = 3; player.invuln = 0;
+    player.spread = 0;
+    fx.length = 0; bullets.length = 0; ebullets.length = 0; powerups.length = 0;
+    gameOver = false;
+    spawnWave(wave);
+    paused = false;
+    
+  }
+
+  // Start
+  spawnWave(wave);
+
+  // -----------------------------
+  // Collision
+  // -----------------------------
+  function hitCircle(ax,ay,ar, bx,by,br){
+    const dx = ax-bx, dy = ay-by;
+    return (dx*dx + dy*dy) <= (ar+br)*(ar+br);
+  }
+
+  // -----------------------------
+  // Drawing ship/enemies
+  // -----------------------------
+  function drawShip(x,y,invuln){
+    ctx.save();
+    ctx.translate(x,y);
+    const pulse = 0.5 + 0.5*Math.sin(t*8);
+    ctx.globalAlpha = invuln>0 ? (0.35 + 0.45*pulse) : 1;
+    ctx.lineWidth = 2;
+
+    // hull glow
+    ctx.beginPath();
+    ctx.moveTo(0,-18);
+    ctx.lineTo(14,16);
+    ctx.lineTo(0,10);
+    ctx.lineTo(-14,16);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(0,255,204,0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,255,204,0.7)";
+    ctx.stroke();
+
+    // core
+    circle(0,2,4,"rgba(255,255,255,0.9)");
+    circle(0,2,9,"rgba(255,0,255,0.18)");
+
+    ctx.restore();
+  }
+
+  function drawEnemy(e){
+    ctx.save();
+    ctx.translate(e.x,e.y);
+    const wob = Math.sin(t*3 + e.phase)*0.25;
+    ctx.rotate(wob);
+    const base = e.type==="boss" ? 1.25 : (e.type==="butterfly" ? 1.0 : 0.9);
+
+    // body
+    ctx.beginPath();
+    ctx.ellipse(0,0, 16*base, 12*base, 0, 0, Math.PI*2);
+    ctx.fillStyle = e.type==="boss" ? "rgba(255,220,70,0.18)" :
+                    e.type==="butterfly" ? "rgba(255,0,255,0.14)" :
+                    "rgba(0,255,204,0.14)";
+    ctx.fill();
+
+    // outline
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = e.type==="boss" ? "rgba(255,220,70,0.85)" :
+                      e.type==="butterfly" ? "rgba(255,0,255,0.75)" :
+                      "rgba(0,255,204,0.75)";
+    ctx.stroke();
+
+    // wings
+    ctx.beginPath();
+    ctx.ellipse(-16*base, 0, 12*base, 10*base, 0, 0, Math.PI*2);
+    ctx.ellipse( 16*base, 0, 12*base, 10*base, 0, 0, Math.PI*2);
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fill();
+
+    // eye/core
+    circle(0,0, 3.5*base, "rgba(255,255,255,0.9)");
+    ctx.restore();
+  }
+
+  // -----------------------------
+  // Update loop
+  // -----------------------------
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, (now-last)/1000);
+    last = now;
+
+    if (!paused && !gameOver) update(dt);
+
+    draw(dt);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function update(dt){
+    t += dt;
+
+    // stars
+    for(const s of stars){
+      s.y += (40 + 120*s.z)*dt;
+      s.tw += dt*(0.8 + s.z);
+      if (s.y > H+5){ s.y = -5; s.x = Math.random()*W; s.z = rand(0.2,1.1); }
+    }
+
+    // player movement
+    const left = keys.has("ArrowLeft") || keys.has("KeyA");
+    const right= keys.has("ArrowRight")|| keys.has("KeyD");
+    const ax = (right?1:0) - (left?1:0);
+
+    const targetV = ax * player.speed;
+    player.vx = lerp(player.vx, targetV, 1 - Math.pow(0.0005, dt)); // smooth
+    player.x += player.vx * dt;
+    player.x = clamp(player.x, 40, W-40);
+
+    if (player.invuln > 0) player.invuln -= dt;
+
+    // fire
+    if (player.cooldown > 0) player.cooldown -= dt;
+
+    if (shootHeld && player.cooldown <= 0){
+      const speed = 980;
+      if (player.spread){
+        bullets.push({x: player.x-10, y: player.y-18, vx: -110, vy: -speed, r: 4, a: 1});
+        bullets.push({x: player.x+10, y: player.y-18, vx:  110, vy: -speed, r: 4, a: 1});
+      } else {
+        bullets.push({x: player.x, y: player.y-18, vx: 0, vy: -speed, r: 4, a: 1});
+      }
+      player.cooldown = player.fireRate;
+    }
+
+    // bullets
+    for(let i=bullets.length-1;i>=0;i--){
+      const b = bullets[i];
+      b.x += b.vx*dt;
+      b.y += b.vy*dt;
+      b.a = clamp(b.a - dt*0.1, 0, 1);
+      if (b.y < -20 || b.x < -30 || b.x > W+30) bullets.splice(i,1);
+    }
+
+    for(let i=ebullets.length-1;i>=0;i--){
+      const b = ebullets[i];
+      b.x += b.vx*dt;
+      b.y += b.vy*dt;
+      if (b.y > H+30 || b.x < -30 || b.x > W+30) ebullets.splice(i,1);
+    }
+
+    // enemies behavior: formation sway + occasional dives + throttled firing
+    const aliveEnemies = enemies.filter(e=>e.alive);
+
+    const D = diffForWave(wave);
+    const inGrace = (t - waveStartT) < D.grace;
+
+    // global shot budget: limits "bullet walls"
+    shotBudget += D.shotsPerSec * dt;
+
+    // formation motion (slower early)
+    const sway = Math.sin(t*0.9) * D.sway;
+
+    // pick a small subset to be "active shooters" this frame
+    // (keeps patterns readable early)
+    let shootersThisFrame = 0;
+
+    // continuous shooter cap: 1.0 at wave 1, ramps to ~2.2 by wave 11, then caps
+    const ramp = clamp((wave - 1) / 10, 0, 1);
+    const maxShootersThisFrame = inGrace ? 0 : (1.0 + 1.2*ramp);
+
+
+    for(const e of enemies){
+      if (!e.alive) continue;
+
+      // chance to start a dive (tiny early, ramps)
+      if (e.dive <= 0){
+        // formation motion
+        e.x = lerp(e.x, e.ox + sway*(0.6 + 0.15*Math.sin(t*e.wob + e.phase)), 0.07);
+        e.y = lerp(e.y, e.oy + 7*Math.sin(t*1.6 + e.phase), 0.07);
+
+        if (!inGrace){
+          const baseDiveChance = 0.0012 + wave*0.00035 + (e.type==="boss"?0.0006:0);
+          const diveChance = baseDiveChance * D.diveMult;
+
+          if (Math.random() < diveChance){
+            e.dive = rand(1.4, 2.3);
+            const dx = (player.x - e.x);
+            e.vx = clamp(dx*0.55, -260, 260);
+            e.vy = rand(190, 290) + wave*7;
+          }
+        }
+      } else {
+        // diving
+        e.dive -= dt;
+        e.vx += Math.sin(t*6 + e.phase)*48*dt;
+        e.x += e.vx*dt;
+        e.y += e.vy*dt;
+
+        if (e.y > H+40){
+          e.y = -40;
+          e.x = clamp(e.x, 40, W-40);
+        }
+        if (e.dive <= 0){
+          e.vx = 0; e.vy = 0;
+          e.x = e.ox; e.y = e.oy;
+        }
+      }
+
+      // enemy fire (THROTTLED globally + staggered)
+      // keep their internal timer, but also require global budget + small shooter cap
+      e.fire -= dt;
+      if (!inGrace && e.fire <= 0 && shotBudget >= 1 && shootersThisFrame + 1e-6 < maxShootersThisFrame){
+
+        // spend budget
+        shotBudget -= 1;
+        shootersThisFrame+=1;
+
+        const dx = player.x - e.x;
+        const dy = player.y - e.y;
+        const d = Math.hypot(dx,dy) || 1;
+
+        const sp = D.bulletSpeed + (e.type==="boss" ? 60 : 0);
+        ebullets.push({
+          x: e.x, y: e.y+10,
+          vx: (dx/d)*sp,
+          vy: (dy/d)*sp,
+          r: e.type==="boss" ? 6 : 4
+        });
+
+        // next shot: slower early, faster later
+        const baseMin = 0.95 * D.fireSlow;
+        const baseMax = 2.00 * D.fireSlow;
+        e.fire = rand(baseMin, baseMax) / (1 + wave*0.03);
+      }
+
+      // if they *wanted* to shoot but couldn't (budget), don't let timer go super negative
+      if (e.fire < -0.25) e.fire = -0.25;
+    }
+
+
+    // player hit by enemy bullet
+    if (player.invuln <= 0){
+      for(let i=ebullets.length-1;i>=0;i--){
+        const b = ebullets[i];
+        if (hitCircle(player.x, player.y, 18, b.x, b.y, b.r)){
+          ebullets.splice(i,1);
+          player.lives--;
+          player.invuln = 1.6;
+          spawnExplosion(player.x, player.y, 1.2);
+            if (player.lives <= 0){
+            high = Math.max(high, score);
+            localStorage.setItem("mini_galaga_high", String(high));
+
+            gameOver = true;
+            paused = false;     // make sure it's not stuck in paused overlay
+            shootHeld = false;  // stop autofire
+            keys.clear();       // stop movement
+            // OPTIONAL: clear bullets so the screen isn't still lethal
+            bullets.length = 0; 
+            ebullets.length = 0;
+
+            // Name entry (local leaderboard)
+            setTimeout(() => {
+              try{
+                const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
+                if (name !== null) addToLB(name, score);
+              } catch(e) {}
+            }, 50);
+
+            return;
+          }
+
+        }
+      }
+    }
+
+    // bullets hit enemies
+    for(let i=bullets.length-1;i>=0;i--){
+      const b = bullets[i];
+      let hit = false;
+      for(const e of enemies){
+        if (!e.alive) continue;
+        if (hitCircle(b.x,b.y,b.r, e.x,e.y,e.r)){
+          hit = true;
+          e.hp -= 1;
+          spawnExplosion(b.x,b.y,0.55);
+          if (e.hp <= 0){
+            e.alive = false;
+            spawnExplosion(e.x,e.y,1.1);
+            // score
+            score += (e.type==="boss"? 250 : e.type==="butterfly"? 140 : 80);
+            // drop powerup sometimes
+            if (Math.random() < 0.08) spawnPowerup(e.x,e.y);
+          } else {
+            score += 20;
+          }
+          break;
+        }
+      }
+      if (hit) bullets.splice(i,1);
+    }
+
+    // collide with diving enemies
+    if (player.invuln <= 0){
+      for(const e of enemies){
+        if (!e.alive) continue;
+        if (hitCircle(player.x, player.y, 18, e.x, e.y, e.r*0.9)){
+          player.lives--;
+          player.invuln = 1.6;
+          spawnExplosion(player.x, player.y, 1.2);
+          e.alive = false;
+          spawnExplosion(e.x, e.y, 1.1);
+          if (player.lives <= 0){
+            high = Math.max(high, score);
+            localStorage.setItem("mini_galaga_high", String(high));
+
+            gameOver = true;
+            paused = false;     // make sure it's not stuck in paused overlay
+            shootHeld = false;  // stop autofire
+            keys.clear();       // stop movement
+            // OPTIONAL: clear bullets so the screen isn't still lethal
+            bullets.length = 0; 
+            ebullets.length = 0;
+
+            // Name entry (local leaderboard)
+            setTimeout(() => {
+              try{
+                const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
+                if (name !== null) addToLB(name, score);
+              } catch(e) {}
+            }, 50);
+
+            return;
+          }
+
+        }
+      }
+    }
+
+    // powerups
+    for(let i=powerups.length-1;i>=0;i--){
+      const p = powerups[i];
+      p.y += p.vy*dt;
+      p.spin += dt*2.2;
+      if (p.y > H+30) powerups.splice(i,1);
+      else if (hitCircle(player.x, player.y, 18, p.x, p.y, p.r)){
+        powerups.splice(i,1);
+        // spread upgrade
+        player.spread = 1;
+        score += 100;
+      }
+    }
+
+    // fx particles
+    for(let i=fx.length-1;i>=0;i--){
+      const f = fx[i];
+      f.life -= dt;
+      f.x += f.vx*dt; f.y += f.vy*dt;
+      f.vy += 420*dt;
+      f.a = clamp(f.life/0.75, 0, 1);
+      if (f.life <= 0) fx.splice(i,1);
+    }
+
+    // wave clear
+    if (aliveEnemies.length === 0){
+      wave++;
+      // small heal-ish: reset spread every few waves? Keep it as a reward instead.
+      spawnWave(wave);
+    }
+
+    // high score update
+    if (score > high){
+      high = score;
+      localStorage.setItem("mini_galaga_high", String(high));
+    }
+  }
+
+  function draw(dt){
+    // background
+    ctx.clearRect(0,0,W,H);
+
+    // stars
+    ctx.save();
+    for(const s of stars){
+      const a = 0.15 + 0.55*s.z*(0.6 + 0.4*Math.sin(s.tw));
+      ctx.globalAlpha = a;
+      circle(s.x, s.y, 1.1*s.z, "#fff");
+    }
+    ctx.restore();
+
+    // subtle grid glow
+    ctx.save();
+    ctx.globalAlpha = 0.10;
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.lineWidth = 1;
+    for(let y=80;y<H;y+=80){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+    }
+    ctx.restore();
+
+    // enemies
+    for(const e of enemies){
+      if (!e.alive) continue;
+      drawEnemy(e);
+    }
+
+    // bullets
+    for(const b of bullets){
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      circle(b.x,b.y,b.r,"rgba(0,255,204,0.95)");
+      circle(b.x,b.y,b.r+6,"rgba(0,255,204,0.12)");
+      ctx.restore();
+    }
+
+    for(const b of ebullets){
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      circle(b.x,b.y,b.r,"rgba(255,80,160,0.95)");
+      circle(b.x,b.y,b.r+7,"rgba(255,80,160,0.12)");
+      ctx.restore();
+    }
+
+    // powerups
+    for(const p of powerups){
+      ctx.save();
+      ctx.translate(p.x,p.y);
+      ctx.rotate(p.spin);
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.rect(-10,-10,20,20);
+      ctx.fillStyle = "rgba(255,255,120,0.18)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,120,0.9)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = "14px system-ui,Segoe UI,Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText("S", -5, 5);
+      ctx.restore();
+    }
+
+    // player
+    drawShip(player.x, player.y, player.invuln);
+
+    // particles
+    for(const f of fx){
+      ctx.save();
+      ctx.globalAlpha = f.a;
+      circle(f.x,f.y,f.r, `hsla(${f.hue}, 95%, 70%, 0.95)`);
+      circle(f.x,f.y,f.r+8, `hsla(${f.hue}, 95%, 70%, 0.08)`);
+      ctx.restore();
+    }
+
+    // HUD
+    text(`Score  ${score}`, 18, 32, 18, 0.95, "left");
+    text(`High  ${high}`, 18, 56, 14, 0.75, "left");
+    text(`Wave  ${wave}`, W-18, 32, 18, 0.95, "right");
+    text(`Lives  ${"♥".repeat(player.lives)}`, W-18, 56, 14, 0.85, "right");
+    // Leaderboard (local)
+    const lb = loadLB();
+    if (lb.length){
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+      text("Leaderboard", W-18, 92, 14, 0.75, "right");
+      for(let i=0;i<Math.min(10, lb.length);i++){
+        const row = lb[i];
+        const y = 112 + i*18;
+        text(`${i+1}. ${row.name}`, W-220, y, 13, 0.70, "left");
+        text(`${row.score}`, W-18, y, 13, 0.75, "right");
+      }
+      ctx.restore();
+    }
+
+    if (paused){
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0,0,W,H);
+      text("PAUSED", W/2, H/2, 44, 0.95, "center");
+      text("Press P to resume", W/2, H/2 + 38, 16, 0.85, "center");
+      ctx.restore();
+    }
+    if (gameOver){
+      ctx.save();
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.fillRect(0,0,W,H);
+
+      text("GAME OVER", W/2, H/2 - 30, 56, 0.95, "center");
+      text(`Score: ${score}`, W/2, H/2 + 18, 20, 0.9, "center");
+      text("Press R to restart", W/2, H/2 + 52, 16, 0.85, "center");
+
+      ctx.restore();
+    }
+
+  }
+})();
+</script>
+</body>
+</html>
