@@ -485,6 +485,83 @@
     }
     .wxBtn:active{ border-style: inset; }
 
+    /* ---- Onion RSS module ---- */
+    .newsbox{
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 16px;
+      border: 3px groove rgba(255,255,255,.35);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.25)),
+        radial-gradient(circle at 20% 10%, rgba(255,255,0,.14), transparent 55%),
+        radial-gradient(circle at 90% 80%, rgba(255,0,255,.14), transparent 60%),
+        rgba(0,0,0,.38);
+      box-shadow:
+        0 0 0 6px rgba(255,255,0,.05),
+        0 0 30px rgba(255,0,255,.10),
+        inset 0 0 18px rgba(255,255,0,.06);
+      position:relative;
+      overflow:hidden;
+    }
+    .newsTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .newsTitle{
+      font-weight: 900;
+      letter-spacing: .7px;
+      text-transform: uppercase;
+      text-shadow: 0 0 10px rgba(255,255,255,.14);
+      font-size: 13px;
+    }
+    .newsStatus{
+      font-size: 12px;
+      opacity:.95;
+      background: rgba(0,0,0,.45);
+      border: 2px inset rgba(255,255,255,.20);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+    .newsList{
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    .newsItem{
+      display:block;
+      padding: 10px 10px;
+      margin-top: 8px;
+      border-radius: 14px;
+      background: rgba(0,0,0,.40);
+      border: 1px dashed rgba(255,255,255,.25);
+    }
+    .newsItem a{
+      color:#fff;
+      text-decoration:none;
+      font-weight:900;
+      letter-spacing:.2px;
+    }
+    .newsItem a:hover{ text-decoration: underline; }
+    .newsMeta{
+      margin-top: 4px;
+      font-size: 11px;
+      opacity:.85;
+    }
+    .newsBtn{
+      margin-top:10px;
+      width:100%;
+      cursor:pointer;
+      font-family:inherit;
+      font-weight:900;
+      padding:10px 12px;
+      border-radius:12px;
+      border:3px outset rgba(255,255,255,.45);
+      background: rgba(0,0,0,.35);
+      color:#fff;
+    }
+    .newsBtn:active{ border-style: inset; }
 
   </style>
 </head>
@@ -588,9 +665,22 @@
             <button class="wxBtn" id="wxBtn">Enable Local Forecast ⛅</button>
             </div>
 
+            <!-- 🧅 Onion Wire panel -->
+            <div class="newsbox" id="newsBox">
+              <div class="newsTop">
+                <div class="newsTitle">🧅BREAKING TRUE NEWS</div>
+                <div class="newsStatus" id="newsStatus">IDLE</div>
+              </div>
+
+              <ul class="newsList" id="newsList" aria-label="Latest Onion headlines"></ul>
+
+              <button class="newsBtn" id="newsBtn">Refresh Onion Headlines 🧅</button>
+            </div>
+
             </div>
 
             <hr style="border:none;border-top:2px dotted rgba(255,255,255,.25); margin:10px 0;">
+
             <div class="blink">★ NEW: Click anywhere for sparkles ★</div>
             <p style="margin:10px 0 0;">
 
@@ -647,14 +737,28 @@
     }));
 
     let t0 = performance.now();
+    let lastFrame = 0;
+
+    const FPS = 20;                 // ⭐ change to 20 for even more savings
+    const FRAME_MS = 1000 / FPS;
+
     function tick(t){
+      if (t - lastFrame < FRAME_MS){
+        requestAnimationFrame(tick);
+        return;
+      }
+      lastFrame = t;
+
       const dt = Math.min(0.05, (t - t0) / 1000);
       t0 = t;
 
       ctx.clearRect(0,0,W,H);
 
       // subtle vignette glow
-      const g = ctx.createRadialGradient(W*0.5, H*0.4, 10, W*0.5, H*0.5, Math.max(W,H)*0.65);
+      const g = ctx.createRadialGradient(
+        W*0.5, H*0.4, 10,
+        W*0.5, H*0.5, Math.max(W,H)*0.65
+      );
       g.addColorStop(0, "rgba(255,0,255,0.08)");
       g.addColorStop(0.5, "rgba(0,255,204,0.05)");
       g.addColorStop(1, "rgba(0,0,0,0)");
@@ -663,8 +767,8 @@
 
       // stars
       for (const s of stars){
-        s.y += (35 * s.z) * DPR * dt;          // drift down
-        s.x += Math.sin(t*0.0003 + s.tw) * 7 * DPR * dt; // gentle sway
+        s.y += (35 * s.z) * DPR * dt;
+        s.x += Math.sin(t*0.0003 + s.tw) * 7 * DPR * dt;
         if (s.y > H + 10) { s.y = -10; s.x = Math.random()*W; }
 
         const twinkle = 0.55 + 0.45*Math.sin(t*0.004 + s.tw);
@@ -679,6 +783,7 @@
       requestAnimationFrame(tick);
     }
     requestAnimationFrame(tick);
+
 
     // ---- Sparkles on click / move (DOM, cheap & cheerful)
     const sparks = document.getElementById("sparks");
@@ -879,6 +984,115 @@
 
     // Wire the button (safe)
     document.getElementById("wxBtn")?.addEventListener("click", requestAndShowWeather);
+    // ---- Onion RSS module (latest headlines) ----
+    function setNewsStatus(text){
+      const el = document.getElementById("newsStatus");
+      if (el) el.textContent = text;
+    }
+    function escapeHTML(s){
+      return String(s).replace(/[&<>"']/g, (m) => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      })[m]);
+    }
+    async function fetchOnionRSS(){
+      const rssUrl = "https://www.theonion.com/rss";
+      const proxies = [
+        // Raw CORS proxy (best when it works)
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(rssUrl),
+
+        // JSON proxy (we’ll extract contents)
+        "https://api.allorigins.win/get?url=" + encodeURIComponent(rssUrl),
+
+        // Jina reader as last resort
+        "https://r.jina.ai/" + rssUrl,
+      ];
+
+      let lastErr = null;
+
+      for (const url of proxies){
+        try{
+          const res = await fetch(url, { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status} @ ${url}`);
+
+          // allorigins "get" returns JSON { contents: "...xml..." }
+          if (url.includes("allorigins.win/get?")){
+            const j = await res.json();
+            if (!j || !j.contents) throw new Error("allorigins JSON missing contents");
+            return j.contents;
+          }
+
+          // raw or jina -> text
+          const txt = await res.text();
+          if (!txt || txt.length < 50) throw new Error("Empty/short response");
+          return txt;
+
+        } catch (e){
+          console.warn("Onion fetch attempt failed:", e);
+          lastErr = e;
+        }
+      }
+
+      throw lastErr || new Error("All proxies failed");
+    }
+
+    function parseRSS(xmlText){
+      const xml = new DOMParser().parseFromString(xmlText, "text/xml");
+      const items = Array.from(xml.querySelectorAll("item"));
+      return items.map(it => ({
+        title: it.querySelector("title")?.textContent?.trim() || "Untitled",
+        link:  it.querySelector("link")?.textContent?.trim()  || "#",
+        pub:   it.querySelector("pubDate")?.textContent?.trim() || ""
+      }));
+    }
+    function niceDate(pubDate){
+      const d = new Date(pubDate);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleString(undefined, { weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+    }
+    async function renderOnion(){
+      const list = document.getElementById("newsList");
+      const btn  = document.getElementById("newsBtn");
+      if (!list) return;
+
+      setNewsStatus("LOADING");
+      if (btn) btn.textContent = "Fetching… 🧅";
+      list.innerHTML = `<li class="newsItem">Contacting the satire dimension…</li>`;
+
+      try{
+        const xmlText = await fetchOnionRSS();
+        const items = parseRSS(xmlText).slice(0, 8);
+
+        if (!items.length){
+          list.innerHTML = `<li class="newsItem">No headlines found. (RSS format changed?)</li>`;
+          setNewsStatus("EMPTY");
+        } else {
+          list.innerHTML = items.map((it) => {
+            const when = niceDate(it.pub);
+            return `
+              <li class="newsItem">
+                <a href="${escapeHTML(it.link)}" target="_blank" rel="noopener noreferrer">
+                  ${escapeHTML(it.title)}
+                </a>
+                <div class="newsMeta">${when ? "🗓️ " + escapeHTML(when) : "🧅 Fresh-ish."}</div>
+              </li>
+            `;
+          }).join("");
+          setNewsStatus("LIVE");
+        }
+
+        if (btn) btn.textContent = "Refresh Onion Headlines 🧅";
+      } catch (e){
+        console.error(e);
+        setNewsStatus("ERROR");
+        list.innerHTML = `<li class="newsItem">Headline feed down: ${escapeHTML(e?.message || e)} 🫠</li>`;
+
+        if (btn) btn.textContent = "Try Again 😵‍💫";
+      }
+    }
+
+// Wire + autoload
+document.getElementById("newsBtn")?.addEventListener("click", renderOnion);
+renderOnion();
 
 
 
