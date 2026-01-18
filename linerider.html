@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Line Rider-ish 😎</title>
+  <style>
+    html, body { height:100%; margin:0; overflow:hidden; background:#070616; }
+    canvas { width:100%; height:100%; display:block; }
+    .hud{
+      position:fixed; left:14px; top:14px;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      color: rgba(255,255,255,0.88);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 16px;
+      padding: 10px 12px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+      user-select:none;
+      max-width: 360px;
+      line-height:1.25;
+      font-size: 12px;
+    }
+    .row{ display:flex; gap:10px; align-items:center; justify-content:space-between; margin-top:6px; }
+    .btn{
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(10, 8, 36, 0.45);
+      color: rgba(255,255,255,0.9);
+      padding: 7px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .btn:hover{ border-color: rgba(255,255,255,0.30); transform: translateY(-1px); }
+    .btn:active{ transform: translateY(0); }
+    .tag{ opacity:0.75; }
+    .kbd{
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      font-size: 11px;
+      margin: 0 2px;
+      display:inline-block;
+    }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud">
+  <div><b>Line Rider-ish</b> <span class="tag">draw • ride • vibe</span></div>
+  <div style="margin-top:6px; opacity:0.8">
+    <span class="kbd">LMB</span> draw • <span class="kbd">Shift</span> snap • <span class="kbd">E</span> erase •
+    <span class="kbd">Space</span> play/pause • <span class="kbd">R</span> reset • <span class="kbd">C</span> clear<br>
+    <span class="kbd">Wheel</span> zoom • <span class="kbd">RMB drag</span> pan
+  </div>
+  <div class="row">
+    <button class="btn" id="play">Play</button>
+    <button class="btn" id="reset">Reset</button>
+    <button class="btn" id="clear">Clear</button>
+    <button class="btn" id="export">Export</button>
+    <button class="btn" id="import">Import</button>
+  </div>
+  <div style="margin-top:6px; opacity:0.8" id="status"></div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha:false, desynchronized:true });
+
+  // ---------- DPR / resize ----------
+  let W=0, H=0, DPR=1;
+  function resize(){
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    W = canvas.width  = Math.floor(innerWidth * DPR);
+    H = canvas.height = Math.floor(innerHeight * DPR);
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  // ---------- camera (world <-> screen) ----------
+  const cam = {
+    x: 0, y: 0, // world coords at screen center
+    z: 1.0      // zoom
+  };
+
+  function screenToWorld(sx, sy){
+    // sx,sy in device pixels
+    const wx = (sx - W/2)/cam.z + cam.x;
+    const wy = (sy - H/2)/cam.z + cam.y;
+    return {x:wx, y:wy};
+  }
+  function worldToScreen(wx, wy){
+    const sx = (wx - cam.x)*cam.z + W/2;
+    const sy = (wy - cam.y)*cam.z + H/2;
+    return {x:sx, y:sy};
+  }
+
+  // ---------- segments ----------
+  // Each segment: {ax,ay,bx,by, n:{x,y}, len, bbox, id}
+  let segments = [];
+  let segId = 1;
+
+  function makeSeg(ax,ay,bx,by){
+    const dx = bx-ax, dy = by-ay;
+    const len = Math.hypot(dx,dy) || 1e-6;
+    // normal (perp) pointing "one side" – we won't depend on direction too much
+    const nx = -dy/len, ny = dx/len;
+    const minx = Math.min(ax,bx), maxx = Math.max(ax,bx);
+    const miny = Math.min(ay,by), maxy = Math.max(ay,by);
+    return { ax,ay,bx,by, nx,ny, len, minx, maxx, miny, maxy, id: segId++ };
+  }
+
+  // ---------- rider physics ----------
+  const rider0 = {
+    x: 0, y: -200,
+    vx: 140, vy: 0,
+    r: 10
+  };
+  const rider = {...rider0};
+
+  const G = 900;          // gravity (px/s^2 world units)
+  const RESTITUTION = 0.05; // bounce
+  const FRICTION = 0.985;   // tangential damping on contact
+  const AIRDRAG = 0.999;    // per step
+
+  let playing = false;
+
+  function resetRider(){
+    Object.assign(rider, rider0);
+  }
+
+  // ---------- pointer / input ----------
+  const ptr = {
+    sx:0, sy:0, // device pixels
+    wx:0, wy:0, // world
+    l:false, r:false,
+    shift:false,
+    drawing:false,
+    erasing:false,
+    lastW:null,
+    panStart:null,
+    camStart:null
+  };
+
+  function updatePtr(e){
+    const rect = canvas.getBoundingClientRect();
+    ptr.sx = (e.clientX - rect.left) * (W / rect.width);
+    ptr.sy = (e.clientY - rect.top) * (H / rect.height);
+    const w = screenToWorld(ptr.sx, ptr.sy);
+    ptr.wx = w.x; ptr.wy = w.y;
+  }
+
+  addEventListener("keydown", (e)=>{
+    if (e.key === "Shift") ptr.shift = true;
+    if (e.key === " "){
+      e.preventDefault();
+      togglePlay();
+    }
+    if (e.key.toLowerCase() === "r") resetRider();
+    if (e.key.toLowerCase() === "c") segments = [];
+    if (e.key.toLowerCase() === "e") ptr.erasing = !ptr.erasing;
+  });
+  addEventListener("keyup", (e)=>{
+    if (e.key === "Shift") ptr.shift = false;
+  });
+
+  canvas.addEventListener("mousedown", (e)=>{
+    updatePtr(e);
+    if (e.button === 0){
+      ptr.l = true;
+      if (ptr.erasing){
+        eraseNear(ptr.wx, ptr.wy);
+      } else {
+        ptr.drawing = true;
+        ptr.lastW = {x:ptr.wx, y:ptr.wy};
+      }
+    }
+    if (e.button === 2){
+      ptr.r = true;
+      ptr.panStart = {sx: ptr.sx, sy: ptr.sy};
+      ptr.camStart = {x: cam.x, y: cam.y};
+    }
+  });
+
+  canvas.addEventListener("mousemove", (e)=>{
+    updatePtr(e);
+
+    if (ptr.r && ptr.panStart){
+      const dx = (ptr.sx - ptr.panStart.sx)/cam.z;
+      const dy = (ptr.sy - ptr.panStart.sy)/cam.z;
+      cam.x = ptr.camStart.x - dx;
+      cam.y = ptr.camStart.y - dy;
+    }
+
+    if (ptr.l && ptr.drawing && ptr.lastW){
+      // Draw with smoothing + minimum segment length
+      let nx = ptr.wx, ny = ptr.wy;
+
+      // Angle snap (0/45/90/...)
+      if (ptr.shift){
+        const dx = nx - ptr.lastW.x;
+        const dy = ny - ptr.lastW.y;
+        const ang = Math.atan2(dy, dx);
+        const snap = Math.PI/4;
+        const a2 = Math.round(ang/snap)*snap;
+        const dist = Math.hypot(dx,dy);
+        nx = ptr.lastW.x + Math.cos(a2)*dist;
+        ny = ptr.lastW.y + Math.sin(a2)*dist;
+      }
+
+      const dx = nx - ptr.lastW.x;
+      const dy = ny - ptr.lastW.y;
+      if (dx*dx + dy*dy > 16){ // min length
+        segments.push(makeSeg(ptr.lastW.x, ptr.lastW.y, nx, ny));
+        ptr.lastW = {x:nx, y:ny};
+      }
+    }
+  });
+
+  addEventListener("mouseup", (e)=>{
+    if (e.button === 0){
+      ptr.l = false;
+      ptr.drawing = false;
+      ptr.lastW = null;
+    }
+    if (e.button === 2){
+      ptr.r = false;
+      ptr.panStart = null;
+      ptr.camStart = null;
+    }
+  });
+
+  canvas.addEventListener("contextmenu", (e)=> e.preventDefault());
+
+  canvas.addEventListener("wheel", (e)=>{
+    // zoom about cursor
+    const rect = canvas.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) * (W / rect.width);
+    const sy = (e.clientY - rect.top) * (H / rect.height);
+    const before = screenToWorld(sx, sy);
+
+    const zoomFactor = Math.exp(-e.deltaY * 0.0012);
+    const newZ = clamp(cam.z * zoomFactor, 0.15*DPR, 5.0*DPR);
+    cam.z = newZ;
+
+    const after = screenToWorld(sx, sy);
+    cam.x += (before.x - after.x);
+    cam.y += (before.y - after.y);
+  }, { passive:true });
+
+  // ---------- erase ----------
+  function pointSegDist2(px,py, s){
+    // distance^2 from point to segment
+    const ax=s.ax, ay=s.ay, bx=s.bx, by=s.by;
+    const abx = bx-ax, aby = by-ay;
+    const apx = px-ax, apy = py-ay;
+    const ab2 = abx*abx + aby*aby;
+    let t = ab2 > 0 ? (apx*abx + apy*aby)/ab2 : 0;
+    t = clamp(t, 0, 1);
+    const cx = ax + abx*t;
+    const cy = ay + aby*t;
+    const dx = px-cx, dy = py-cy;
+    return dx*dx + dy*dy;
+  }
+
+  function eraseNear(x,y){
+    if (!segments.length) return;
+    const rad = 18 / cam.z; // world radius based on zoom
+    const r2 = rad*rad;
+    let best = -1, bestD = Infinity;
+    for (let i=0;i<segments.length;i++){
+      const d2 = pointSegDist2(x,y,segments[i]);
+      if (d2 < r2 && d2 < bestD){
+        bestD = d2; best = i;
+      }
+    }
+    if (best >= 0) segments.splice(best, 1);
+  }
+
+  // ---------- collision ----------
+  function collideCircleWithSegment(cx,cy,r, s){
+    // closest point
+    const ax=s.ax, ay=s.ay, bx=s.bx, by=s.by;
+    const abx = bx-ax, aby = by-ay;
+    const apx = cx-ax, apy = cy-ay;
+    const ab2 = abx*abx + aby*aby;
+
+    let t = ab2>0 ? (apx*abx + apy*aby)/ab2 : 0;
+    t = clamp(t, 0, 1);
+
+    const px = ax + abx*t;
+    const py = ay + aby*t;
+
+    const dx = cx - px;
+    const dy = cy - py;
+    const d2 = dx*dx + dy*dy;
+
+    if (d2 > r*r) return null;
+
+    const d = Math.sqrt(d2) || 1e-6;
+    const nx = dx/d;
+    const ny = dy/d;
+
+    return { px, py, nx, ny, pen: (r - d) };
+  }
+
+  // ---------- simulation step ----------
+  let lastT = performance.now();
+
+  function step(dt){
+    // integrate
+    rider.vy += G * dt;
+    rider.vx *= Math.pow(AIRDRAG, dt*60);
+    rider.vy *= Math.pow(AIRDRAG, dt*60);
+
+    rider.x += rider.vx * dt;
+    rider.y += rider.vy * dt;
+
+    // collisions: iterate a few times for stability
+    for (let iter=0; iter<4; iter++){
+      let hit = null;
+      let bestPen = 0;
+
+      for (let i=0;i<segments.length;i++){
+        // bbox quick reject
+        const s = segments[i];
+        const minx = s.minx - rider.r, maxx = s.maxx + rider.r;
+        const miny = s.miny - rider.r, maxy = s.maxy + rider.r;
+        if (rider.x < minx || rider.x > maxx || rider.y < miny || rider.y > maxy) continue;
+
+        const h = collideCircleWithSegment(rider.x, rider.y, rider.r, s);
+        if (h && h.pen > bestPen){
+          bestPen = h.pen;
+          hit = {h, s};
+        }
+      }
+
+      if (!hit) break;
+
+      const {nx, ny, pen} = hit.h;
+
+      // push out
+      rider.x += nx * (pen + 0.01);
+      rider.y += ny * (pen + 0.01);
+
+      // split velocity into normal/tangent
+      const vn = rider.vx*nx + rider.vy*ny;
+      const tx = -ny, ty = nx;
+      const vt = rider.vx*tx + rider.vy*ty;
+
+      // Only reflect if moving into surface
+      if (vn < 0){
+        const newVn = -vn * RESTITUTION;
+        let newVt = vt * FRICTION;
+
+        // small "stick to track" help: keep rider hugging lines
+        // if gravity pushes into line, damp normal a bit more
+        const stick = 0.92;
+        rider.vx = tx*newVt + nx*newVn*stick;
+        rider.vy = ty*newVt + ny*newVn*stick;
+      }
+    }
+
+    // auto-follow camera a bit while playing
+    cam.x = lerp(cam.x, rider.x, 0.08);
+    cam.y = lerp(cam.y, rider.y, 0.08);
+  }
+
+  // ---------- rendering ----------
+  function drawGrid(){
+    // subtle world grid for depth
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1;
+
+    const spacing = 120;
+    // find visible bounds in world
+    const tl = screenToWorld(0,0);
+    const br = screenToWorld(W,H);
+
+    const x0 = Math.floor(tl.x/spacing)*spacing;
+    const y0 = Math.floor(tl.y/spacing)*spacing;
+
+    for (let x=x0; x<br.x+spacing; x+=spacing){
+      const a = worldToScreen(x, tl.y);
+      const b = worldToScreen(x, br.y);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    for (let y=y0; y<br.y+spacing; y+=spacing){
+      const a = worldToScreen(tl.x, y);
+      const b = worldToScreen(br.x, y);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawSegments(){
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    // glow pass
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowBlur = 14*DPR;
+    ctx.shadowColor = "rgba(120,180,255,0.25)";
+    ctx.strokeStyle = "rgba(170,210,255,0.28)";
+    ctx.lineWidth = 4*DPR;
+    ctx.beginPath();
+    for (const s of segments){
+      const a = worldToScreen(s.ax,s.ay);
+      const b = worldToScreen(s.bx,s.by);
+      ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+    }
+    ctx.stroke();
+
+    // main line pass
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2*DPR;
+    ctx.beginPath();
+    for (const s of segments){
+      const a = worldToScreen(s.ax,s.ay);
+      const b = worldToScreen(s.bx,s.by);
+      ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+    }
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawRider(){
+    const p = worldToScreen(rider.x, rider.y);
+
+    // direction indicator
+    const sp = Math.hypot(rider.vx, rider.vy);
+    const ux = sp>1e-6 ? rider.vx/sp : 1;
+    const uy = sp>1e-6 ? rider.vy/sp : 0;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.shadowBlur = 18*DPR;
+    ctx.shadowColor = "rgba(255,120,220,0.25)";
+    ctx.fillStyle = "rgba(255,150,240,0.25)";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, (rider.r+6)*cam.z, 0, Math.PI*2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // body
+    ctx.globalCompositeOperation = "source-over";
+    ctx.fillStyle = "rgba(255,255,255,0.95)";
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, rider.r*cam.z, 0, Math.PI*2);
+    ctx.fill();
+
+    // nose
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 2*DPR;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + ux*rider.r*cam.z*1.6, p.y + uy*rider.r*cam.z*1.6);
+    ctx.stroke();
+
+    // little sled
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 3*DPR;
+    const tx = -uy, ty = ux;
+    ctx.beginPath();
+    ctx.moveTo(p.x + tx*rider.r*cam.z*0.9, p.y + ty*rider.r*cam.z*0.9);
+    ctx.lineTo(p.x - tx*rider.r*cam.z*0.9, p.y - ty*rider.r*cam.z*0.9);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawCursorPreview(){
+    if (!ptr.l || !ptr.drawing || !ptr.lastW) return;
+    const a = worldToScreen(ptr.lastW.x, ptr.lastW.y);
+
+    let nx = ptr.wx, ny = ptr.wy;
+    if (ptr.shift){
+      const dx = nx - ptr.lastW.x;
+      const dy = ny - ptr.lastW.y;
+      const ang = Math.atan2(dy, dx);
+      const snap = Math.PI/4;
+      const a2 = Math.round(ang/snap)*snap;
+      const dist = Math.hypot(dx,dy);
+      nx = ptr.lastW.x + Math.cos(a2)*dist;
+      ny = ptr.lastW.y + Math.sin(a2)*dist;
+    }
+    const b = worldToScreen(nx, ny);
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 2*DPR;
+    ctx.setLineDash([6*DPR, 6*DPR]);
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawEraserHint(){
+    if (!ptr.erasing) return;
+    const p = worldToScreen(ptr.wx, ptr.wy);
+    const rad = 18*DPR;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,120,120,0.55)";
+    ctx.lineWidth = 2*DPR;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,rad,0,Math.PI*2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function render(){
+    // background
+    ctx.fillStyle = "#070616";
+    ctx.fillRect(0,0,W,H);
+
+    // vignette glow
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const grad = ctx.createRadialGradient(W*0.25, H*0.2, 0, W*0.25, H*0.2, Math.max(W,H)*0.9);
+    grad.addColorStop(0, "rgba(120,80,255,0.12)");
+    grad.addColorStop(0.45, "rgba(0,0,0,0)");
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,W,H);
+    ctx.restore();
+
+    drawGrid();
+    drawSegments();
+    drawRider();
+    drawCursorPreview();
+    drawEraserHint();
+
+    // signature 😎
+    ctx.save();
+    ctx.font = `${14*DPR}px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial`;
+    ctx.fillStyle = "rgba(255,255,255,0.7)";
+    ctx.fillText("😎", W - 26*DPR, H - 16*DPR);
+    ctx.restore();
+  }
+
+  // ---------- helpers ----------
+  function clamp(x,a,b){ return x<a?a:(x>b?b:x); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  // ---------- UI buttons ----------
+  const status = document.getElementById("status");
+  const btnPlay = document.getElementById("play");
+  const btnReset = document.getElementById("reset");
+  const btnClear = document.getElementById("clear");
+  const btnExport = document.getElementById("export");
+  const btnImport = document.getElementById("import");
+
+  function setStatus(){
+    status.textContent =
+      `${playing ? "RUNNING" : "PAUSED"} • segments: ${segments.length} • mode: ${ptr.erasing ? "ERASE" : "DRAW"} • zoom: ${(cam.z/DPR).toFixed(2)}x`;
+    btnPlay.textContent = playing ? "Pause" : "Play";
+  }
+
+  function togglePlay(){
+    playing = !playing;
+    setStatus();
+  }
+
+  btnPlay.onclick = togglePlay;
+  btnReset.onclick = () => { resetRider(); setStatus(); };
+  btnClear.onclick = () => { segments = []; setStatus(); };
+  btnExport.onclick = async () => {
+    const data = {
+      rider0,
+      cam: {x: cam.x, y: cam.y, z: cam.z/DPR},
+      segments: segments.map(s => ({ax:s.ax,ay:s.ay,bx:s.bx,by:s.by}))
+    };
+    const txt = JSON.stringify(data);
+    try{
+      await navigator.clipboard.writeText(txt);
+      status.textContent = "Exported JSON to clipboard.";
+    } catch {
+      prompt("Copy this JSON:", txt);
+    }
+  };
+  btnImport.onclick = () => {
+    const txt = prompt("Paste exported JSON:");
+    if (!txt) return;
+    try{
+      const data = JSON.parse(txt);
+      segments = (data.segments || []).map(o => makeSeg(o.ax,o.ay,o.bx,o.by));
+      if (data.cam){
+        cam.x = data.cam.x || 0;
+        cam.y = data.cam.y || 0;
+        cam.z = clamp((data.cam.z || 1)*DPR, 0.15*DPR, 5.0*DPR);
+      }
+      if (data.rider0){
+        Object.assign(rider0, data.rider0);
+        resetRider();
+      }
+      status.textContent = "Imported.";
+    } catch(e){
+      alert("Invalid JSON.");
+    }
+    setStatus();
+  };
+
+  setStatus();
+
+  // ---------- main loop ----------
+  function frame(t){
+    const dt = clamp((t - lastT)/1000, 0, 1/20);
+    lastT = t;
+
+    if (playing){
+      // substeps for stability
+      const steps = 3;
+      for (let i=0;i<steps;i++) step(dt/steps);
+    }
+
+    render();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
+``` 😎
+
+If you want it **more like the OG** (acceleration curve, “snow” lines vs “solid” lines, rider ragdoll joints, zoom-to-fit track, undo stack, and export/import in the classic `.track` style), tell me which features you care about most and I’ll extend this in the same single-file format. 😎
