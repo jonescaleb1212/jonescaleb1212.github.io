@@ -60,11 +60,13 @@
   let shootHeld = false;
 
   window.addEventListener("keydown", (e) => {
-    if (["ArrowLeft","ArrowRight","Space","KeyA","KeyD","KeyP","KeyR"].includes(e.code)) e.preventDefault();
+    if (["ArrowLeft","ArrowRight","Space","KeyA","KeyD","KeyP","KeyR","KeyB"].includes(e.code)) e.preventDefault();
+
     keys.add(e.code);
 
     if (e.code === "Space") shootHeld = true;
     if (e.code === "KeyP" && !gameOver) paused = !paused;
+    if (e.code === "KeyB") tryBomb();
 
     if (e.code === "KeyR") reset();
   });
@@ -101,6 +103,30 @@
     const top = lb.slice(0, 10);
     saveLB(top);
     return top;
+  }
+  function tryBomb(){
+    if (paused || gameOver) return;
+    if (player.bombs <= 0) return;
+
+    player.bombs--;
+
+    // clear enemy bullets
+    ebullets.length = 0;
+
+    // damage all enemies (not always insta-kill bosses)
+    for (const e of enemies){
+      if (!e.alive) continue;
+      e.hp -= (e.type === "boss") ? 3 : 99; // bosses survive sometimes
+      spawnExplosion(e.x, e.y, 0.9);
+      if (e.hp <= 0){
+        e.alive = false;
+        spawnExplosion(e.x, e.y, 1.2);
+        score += (e.type==="boss"? 200 : e.type==="butterfly"? 120 : 70);
+      }
+    }
+
+    // big center flash
+    spawnExplosion(player.x, player.y-40, 1.8);
   }
 
   // -----------------------------
@@ -160,6 +186,9 @@
     lives: 3,
     invuln: 0,
     spread: 0,      // 0 = single, 1 = double
+    rapidT: 0,
+    shield: 0,
+    bombs: 0,
   };
 
   function spawnExplosion(x,y,scale=1){
@@ -177,15 +206,24 @@
   }
 
   function spawnPowerup(x,y){
+    // Weighted random drops
+    const r = Math.random();
+    const type =
+      (r < 0.45) ? "spread" :
+      (r < 0.75) ? "rapid"  :
+      (r < 0.92) ? "shield" :
+                   "bomb";
+
     powerups.push({
       x,y,
       vy: 120,
       r: 12,
       a: 1,
-      type: "spread",
+      type,
       spin: rand(0,Math.PI*2)
     });
   }
+
 
   function makeEnemy(x,y,type="bee"){
     const base = (type==="boss") ? 2.1 : (type==="butterfly") ? 1.4 : 1.0;
@@ -239,6 +277,10 @@
     player.x = W*0.5; player.vx = 0;
     player.lives = 3; player.invuln = 0;
     player.spread = 0;
+    player.rapidT = 0;
+    player.shield = 0;
+    player.bombs = 0;
+
     fx.length = 0; bullets.length = 0; ebullets.length = 0; powerups.length = 0;
     gameOver = false;
     spawnWave(wave);
@@ -359,17 +401,30 @@
     if (player.invuln > 0) player.invuln -= dt;
 
     // fire
+    if (player.rapidT > 0) player.rapidT -= dt;
+
+    const effectiveFireRate = (player.rapidT > 0)
+      ? Math.max(0.055, player.fireRate * 0.55)   // faster while rapid is active
+      : player.fireRate;
+
     if (player.cooldown > 0) player.cooldown -= dt;
 
     if (shootHeld && player.cooldown <= 0){
       const speed = 980;
-      if (player.spread){
-        bullets.push({x: player.x-10, y: player.y-18, vx: -110, vy: -speed, r: 4, a: 1});
-        bullets.push({x: player.x+10, y: player.y-18, vx:  110, vy: -speed, r: 4, a: 1});
-      } else {
+
+      // spread levels: 0 single, 1 double, 2 triple
+      if (player.spread === 0){
         bullets.push({x: player.x, y: player.y-18, vx: 0, vy: -speed, r: 4, a: 1});
+      } else if (player.spread === 1){
+        bullets.push({x: player.x-10, y: player.y-18, vx: -95, vy: -speed, r: 4, a: 1});
+        bullets.push({x: player.x+10, y: player.y-18, vx:  95, vy: -speed, r: 4, a: 1});
+      } else { // triple
+        bullets.push({x: player.x,     y: player.y-18, vx:   0, vy: -speed, r: 4, a: 1});
+        bullets.push({x: player.x-12,  y: player.y-18, vx: -135, vy: -speed, r: 4, a: 1});
+        bullets.push({x: player.x+12,  y: player.y-18, vx:  135, vy: -speed, r: 4, a: 1});
       }
-      player.cooldown = player.fireRate;
+
+      player.cooldown = effectiveFireRate;
     }
 
     // bullets
@@ -479,40 +534,49 @@
 
 
     // player hit by enemy bullet
+    // player hit by enemy bullet
     if (player.invuln <= 0){
       for(let i=ebullets.length-1;i>=0;i--){
         const b = ebullets[i];
         if (hitCircle(player.x, player.y, 18, b.x, b.y, b.r)){
           ebullets.splice(i,1);
-          player.lives--;
-          player.invuln = 1.6;
-          spawnExplosion(player.x, player.y, 1.2);
+
+          if (player.shield > 0){
+            player.shield--;
+            player.invuln = 0.9;
+            spawnExplosion(player.x, player.y, 0.8);
+          } else {
+            player.lives--;
+            player.invuln = 1.6;
+            spawnExplosion(player.x, player.y, 1.2);
+
             if (player.lives <= 0){
-            high = Math.max(high, score);
-            localStorage.setItem("mini_galaga_high", String(high));
+              high = Math.max(high, score);
+              localStorage.setItem("mini_galaga_high", String(high));
+              gameOver = true;
+              paused = false;
+              shootHeld = false;
+              keys.clear();
+              bullets.length = 0;
+              ebullets.length = 0;
 
-            gameOver = true;
-            paused = false;     // make sure it's not stuck in paused overlay
-            shootHeld = false;  // stop autofire
-            keys.clear();       // stop movement
-            // OPTIONAL: clear bullets so the screen isn't still lethal
-            bullets.length = 0; 
-            ebullets.length = 0;
+              setTimeout(() => {
+                try{
+                  const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
+                  if (name !== null) addToLB(name, score);
+                } catch(e) {}
+              }, 50);
 
-            // Name entry (local leaderboard)
-            setTimeout(() => {
-              try{
-                const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
-                if (name !== null) addToLB(name, score);
-              } catch(e) {}
-            }, 50);
-
-            return;
+              return;
+            }
           }
 
+          // only take one hit per frame
+          break;
         }
       }
     }
+
 
     // bullets hit enemies
     for(let i=bullets.length-1;i>=0;i--){
@@ -541,38 +605,47 @@
     }
 
     // collide with diving enemies
+    // collide with diving enemies
     if (player.invuln <= 0){
       for(const e of enemies){
         if (!e.alive) continue;
         if (hitCircle(player.x, player.y, 18, e.x, e.y, e.r*0.9)){
-          player.lives--;
-          player.invuln = 1.6;
-          spawnExplosion(player.x, player.y, 1.2);
-          e.alive = false;
-          spawnExplosion(e.x, e.y, 1.1);
-          if (player.lives <= 0){
-            high = Math.max(high, score);
-            localStorage.setItem("mini_galaga_high", String(high));
 
-            gameOver = true;
-            paused = false;     // make sure it's not stuck in paused overlay
-            shootHeld = false;  // stop autofire
-            keys.clear();       // stop movement
-            // OPTIONAL: clear bullets so the screen isn't still lethal
-            bullets.length = 0; 
-            ebullets.length = 0;
+          if (player.shield > 0){
+            player.shield--;
+            player.invuln = 0.9;
+            spawnExplosion(player.x, player.y, 0.8);
+          } else {
+            player.lives--;
+            player.invuln = 1.6;
+            spawnExplosion(player.x, player.y, 1.2);
 
-            // Name entry (local leaderboard)
-            setTimeout(() => {
-              try{
-                const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
-                if (name !== null) addToLB(name, score);
-              } catch(e) {}
-            }, 50);
+            if (player.lives <= 0){
+              high = Math.max(high, score);
+              localStorage.setItem("mini_galaga_high", String(high));
+              gameOver = true;
+              paused = false;
+              shootHeld = false;
+              keys.clear();
+              bullets.length = 0;
+              ebullets.length = 0;
 
-            return;
+              setTimeout(() => {
+                try{
+                  const name = prompt("GAME OVER! Enter your name for the leaderboard:", "");
+                  if (name !== null) addToLB(name, score);
+                } catch(e) {}
+              }, 50);
+
+              return;
+            }
           }
 
+          // enemy still dies on collision either way
+          e.alive = false;
+          spawnExplosion(e.x, e.y, 1.1);
+
+          break;
         }
       }
     }
@@ -584,10 +657,22 @@
       p.spin += dt*2.2;
       if (p.y > H+30) powerups.splice(i,1);
       else if (hitCircle(player.x, player.y, 18, p.x, p.y, p.r)){
-        powerups.splice(i,1);
-        // spread upgrade
-        player.spread = 1;
-        score += 100;
+    powerups.splice(i,1);
+
+    if (p.type === "spread"){
+      player.spread = Math.min(2, player.spread + 1); // 0->1->2
+      score += 120;
+    } else if (p.type === "rapid"){
+      player.rapidT = Math.min(10, player.rapidT + 4.0); // stacks duration
+      score += 90;
+    } else if (p.type === "shield"){
+      player.shield = Math.min(5, player.shield + 1); // stacks charges
+      score += 110;
+    } else if (p.type === "bomb"){
+      player.bombs = Math.min(3, player.bombs + 1);
+      score += 80;
+    }
+
       }
     }
 
@@ -676,7 +761,16 @@
       ctx.stroke();
       ctx.font = "14px system-ui,Segoe UI,Arial";
       ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.fillText("S", -5, 5);
+      const label =
+        p.type === "spread" ? "S" :
+        p.type === "rapid"  ? "⚡" :
+        p.type === "shield" ? "⛨" :
+                              "💣";
+
+      ctx.font = "14px system-ui,Segoe UI,Arial";
+      ctx.fillStyle = "rgba(255,255,255,0.95)";
+      ctx.fillText(label, -6, 6);
+
       ctx.restore();
     }
 
@@ -697,6 +791,10 @@
     text(`High  ${high}`, 18, 56, 14, 0.75, "left");
     text(`Wave  ${wave}`, W-18, 32, 18, 0.95, "right");
     text(`Lives  ${"♥".repeat(player.lives)}`, W-18, 56, 14, 0.85, "right");
+    text(`Shield  ${"⛨".repeat(player.shield)}`, 18, 78, 13, 0.80, "left");
+    text(`Bombs  ${player.bombs}`, W-18, 78, 13, 0.80, "right");
+    if (player.rapidT > 0) text(`RAPID  ${player.rapidT.toFixed(1)}s`, W/2, 56, 14, 0.88, "center");
+
     // Leaderboard (local)
     const lb = loadLB();
     if (lb.length){
