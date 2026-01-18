@@ -39,10 +39,10 @@
         linear-gradient(-45deg, rgba(0,255,204,.10) 25%, transparent 25%) -18px 0/36px 36px,
         linear-gradient(45deg, transparent 75%, rgba(255,255,0,.10) 75%) -18px 0/36px 36px,
         linear-gradient(-45deg, transparent 75%, rgba(255,128,0,.10) 75%) -18px 0/36px 36px;
-      mix-blend-mode: screen;
+      mix-blend-mode: normal;
       filter: saturate(140%);
       animation: drift 12s linear infinite;
-      opacity:.7;
+      opacity:.35;
     }
     @keyframes drift{
       from { transform: translate3d(0,0,0); }
@@ -58,8 +58,8 @@
         rgba(0,0,0,0) 3px,
         rgba(0,0,0,0) 6px
       );
-      opacity:.22;
-      mix-blend-mode: overlay;
+      opacity:.12;
+      mix-blend-mode: normal;
     }
 
     /* Marquee-style text bands */
@@ -1094,16 +1094,6 @@
 document.getElementById("newsBtn")?.addEventListener("click", renderOnion);
 renderOnion();
 
-
-
-    let last = 0;
-    window.addEventListener("pointermove", (e) => {
-      const now = performance.now();
-      if (now - last > 70) { // throttle
-        last = now;
-        if (Math.random() < 0.4) spawnSpark(e.clientX, e.clientY);
-      }
-    }, { passive: true });
 
     window.addEventListener("click", (e) => {
       for(let i=0;i<8;i++) spawnSpark(e.clientX, e.clientY);
