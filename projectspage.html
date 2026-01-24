@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Two Images</title>
+  <title>Projects</title>
   <style>
     body{
       margin:0;
@@ -48,11 +48,15 @@
       color:#fff;
     }
 
-    img{
-      max-width:100%;
-      max-height:70vh;
-      border:1px solid #ddd;
+    .panel img{
+    width: 420px;
+    height: 300px;
+    object-fit: cover;     /* <-- key change */
+    border: 1px solid #ddd;
+    display: block;
     }
+
+
 
     @media (max-width: 900px){
       .wrap{
